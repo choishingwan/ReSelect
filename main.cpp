@@ -11,6 +11,60 @@
 #include "gzstream.h"
 
 
+template <class T>
+class vec2d
+{
+public:
+    vec2d() {}
+    vec2d(size_t row, size_t col, T def)
+    {
+        if (row == 0 || col == 0) {
+            throw std::invalid_argument("Dimension of 2d vector must be >0");
+        }
+        m_storage.resize(row * col, def);
+        m_row = row;
+        m_col = col;
+    }
+    vec2d(size_t row, size_t col)
+    {
+        if (row == 0 || col == 0) {
+            throw std::invalid_argument("Dimension of 2d vector must be >0");
+        }
+        m_storage.resize(row * col);
+        m_row = row;
+        m_col = col;
+    }
+    T operator()(size_t row, size_t col) const
+    {
+        if (row > m_row || col > m_col){
+            std::cerr << "In const" << std::endl;
+            std::cerr << "Dimension: " << m_row << "\t" << m_col << std::endl;
+            std::cerr << "Requested: " << row << "\t" << col << std::endl;
+            throw std::out_of_range("2d vector out of range!");
+        }
+        return m_storage[row * m_col + col];
+    }
+    T& operator()(size_t row, size_t col)
+    {
+        if (row > m_row || col > m_col){
+            std::cerr << "Dimension: " << m_row << "\t" << m_col << std::endl;
+            std::cerr << "Requested: " << row << "\t" << col << std::endl;
+            throw std::out_of_range("2d vector out of range!");
+        }
+        return m_storage[row * m_col + col];
+    }
+    void clear() { m_storage.clear(); }
+    size_t rows() const { return m_row; }
+    size_t cols() const { return m_col; }
+
+private:
+    size_t m_row = 0;
+    size_t m_col = 0;
+    std::vector<T> m_storage;
+};
+
+
+
 void usage()
 {
 
@@ -281,7 +335,9 @@ int main(int argc, char *argv[])
     // now start generating the result file at the same time as reading the file
 
     std::vector<bool> in_base, in_target;
-    int num_base=0, num_target = 0;
+    std::vector<int> base_idx, target_idx;
+    int base_idx_it = 0, target_idx_it = 0;
+    size_t num_base=0, num_target = 0;
     bool base, target;
     while(getline(id_file, line)){
         trim(line);
@@ -295,45 +351,68 @@ int main(int argc, char *argv[])
         in_base.push_back(base);
         in_target.push_back(target);
         if(base){
+            base_idx.push_back(base_idx_it++);
             output_row << token[0] << "\t" << token[1] << std::endl;
             ++num_base;
+        }else{
+            base_idx.push_back(-1);
         }
         if(target){
+            target_idx.push_back(target_idx_it++);
             output_col << token[0] << "\t" << token[1] << std::endl;
             ++num_target;
+        }else{
+            target_idx.push_back(-1);
         }
     }
     std::cerr << num_base << " Base ID found in relationship matrix" << std::endl;
-    std::cerr << num_target << " Base ID found in relationship matrix" << std::endl;
+    std::cerr << num_target << " Target ID found in relationship matrix" << std::endl;
+    vec2d<double> rel_matrix(num_base, num_target);
     base_ids.clear();
     target_ids.clear();
     output_row.close();
     output_col.close();
     id_file.close();
     size_t cur_id = 0;
-    RunningStat mean_related;
     while((!gz_input && std::getline(matrix_file, line))
           || (gz_input && std::getline(matrix_gz_file, line))){
         trim(line);
         if(line.empty()) continue;
-        if(in_base[cur_id]){
+        if(in_base[cur_id] || in_target[cur_id]){
             // only do the printing and calculation if we need this row
             token = split(line);
             for(size_t i = 0; i < token.size(); ++i){
-                if(in_target[i]){
-                    output_matrix << token[i] << "\t";
-                    mean_related.push(convert<double>(token[i]));
+                double ibd = convert<double>(token[i]);
+                if(i == cur_id) ibd = 1.0;
+                if(in_base[cur_id] && in_target[i]){
+                    rel_matrix(static_cast<size_t>(base_idx[cur_id]),
+                               static_cast<size_t>(target_idx[i])) = ibd;
+                }
+                if(in_base[i] && in_target[cur_id]){
+                    rel_matrix(static_cast<size_t>(base_idx[i]),
+                               static_cast<size_t>(target_idx[cur_id])) = ibd;
                 }
             }
-            output_matrix << std::endl;
         }
         ++cur_id;
     }
     if(!gz_input) matrix_file.close();
     else matrix_gz_file.close();
+
+    RunningStat mean_related;
+    for(size_t r = 0; r < rel_matrix.rows(); ++r){
+        mean_related.push(rel_matrix(r, 0));
+        output_matrix<< rel_matrix(r, 0);
+        for(size_t c = 1; c < rel_matrix.cols(); ++c){
+            output_matrix << "\t" << rel_matrix(r, c);
+            mean_related.push(rel_matrix(r, c));
+        }
+        output_matrix << std::endl;
+    }
     output_matrix.close();
     output_avg << "Mean\tSD\tVar\tN" << std::endl;
     output_avg << mean_related.mean() << "\t" << mean_related.sd() << "\t" << mean_related.var() << "\t" << mean_related.get_n() << std::endl;
+
     output_avg.close();
     std::cerr << "Mean Relatedness is: " <<mean_related.mean() << std::endl;
     return 0;
