@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <assert.h>
 #include <sstream>
+#include <math.h>
 #include "gzstream.h"
 
 
