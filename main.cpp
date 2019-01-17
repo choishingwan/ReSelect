@@ -64,8 +64,6 @@ private:
     std::vector<T> m_storage;
 };
 
-
-
 void usage()
 {
 
@@ -78,6 +76,21 @@ void usage()
     std::cerr << "    --target  | -t    Target Sample IDs\n";
     std::cerr << "    --out     | -o    Output Prefix\n";
     std::cerr << "    --help    | -h    Display this help message\n";
+}
+size_t split(std::vector<std::string>& result,
+             const std::string& seq,
+             const std::string& separators=" \t")
+{
+    std::size_t prev = 0, pos;
+    size_t id = 0;
+    while ((pos = seq.find_first_of(separators, prev)) != std::string::npos)
+    {
+        if (pos > prev) result[id++]=(seq.substr(prev, pos - prev));
+        prev = pos + 1;
+    }
+    if (prev < seq.length())
+        result[id++]=(seq.substr(prev, std::string::npos));
+    return id;
 }
 
 std::vector<std::string> split(const std::string& seq,
@@ -94,6 +107,7 @@ std::vector<std::string> split(const std::string& seq,
         result.emplace_back(seq.substr(prev, std::string::npos));
     return result;
 }
+
 void ltrim(std::string& s)
 {
     s.erase(s.begin(),
@@ -155,7 +169,6 @@ private:
     size_t n = 0;
     double M1 = 0, M2 = 0, M3 = 0, M4 = 0;
 };
-
 
 template <typename T>
 inline T convert(const std::string& str)
@@ -338,11 +351,12 @@ int main(int argc, char *argv[])
     std::vector<bool> in_base, in_target;
     std::vector<int> base_idx, target_idx;
     int base_idx_it = 0, target_idx_it = 0;
-    size_t num_base=0, num_target = 0;
+    size_t num_base=0, num_target = 0, num_total=0;
     bool base, target;
     while(getline(id_file, line)){
         trim(line);
         if(line.empty()) continue;
+        ++num_total;
         base= false;
         target = false;
         token = split(line);
@@ -366,6 +380,7 @@ int main(int argc, char *argv[])
             target_idx.push_back(-1);
         }
     }
+    std::cerr << num_total << " samples found in relationship matrix" << std::endl;
     std::cerr << num_base << " Base ID found in relationship matrix" << std::endl;
     std::cerr << num_target << " Target ID found in relationship matrix" << std::endl;
     vec2d<double> rel_matrix(num_base, num_target);
@@ -375,14 +390,16 @@ int main(int argc, char *argv[])
     output_col.close();
     id_file.close();
     size_t cur_id = 0;
+    token.resize(num_total);
+    size_t token_size = 0;
     while((!gz_input && std::getline(matrix_file, line))
           || (gz_input && std::getline(matrix_gz_file, line))){
         trim(line);
         if(line.empty()) continue;
         if(in_base[cur_id] || in_target[cur_id]){
             // only do the printing and calculation if we need this row
-            token = split(line);
-            for(size_t i = 0; i < token.size(); ++i){
+            token_size = split(token, line);
+            for(size_t i = 0; i < token_size; ++i){
                 double ibd = convert<double>(token[i]);
                 if(i == cur_id) ibd = 1.0;
                 if(in_base[cur_id] && in_target[i]){
